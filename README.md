@@ -1,6 +1,6 @@
 # MagicMarkets API — Claude Skill
 
-A drop-in Claude skill for the **MagicMarkets** P2P sports markets exchange
+A drop-in Claude skill for the **MagicMarkets** P2P sports trading exchange
 — **zero fees, zero commission**, USDT-denominated, REST + WebSocket. Built
 so an LLM can write a working trading bot against the API the first time you
 ask.
