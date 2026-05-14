@@ -751,6 +751,47 @@ asyncio.run(go())
 See [`references/pricefeed-reference.md`](references/pricefeed-reference.md)
 for the full message protocol.
 
+### Aggregate volume per event
+
+There is **no event-level `volume` field** in the API. Volume lives at the
+**outcome** level: every outcome 4-tuple in an `offers_event` is
+`[outcome_id, back_prices, lay_prices, ["USDT", n]]`. To get a per-event
+total, walk every column → every handicap line → every outcome and sum.
+
+```python
+def event_volume(cols):
+    """Sum settled USDT volume across every outcome of every column.
+
+    `cols` is the third element of an `offers_event` message:
+        ["offers_event", [comp_id, sport, event_id], cols]
+    Returns: (grand_total, {column_name: total})
+    """
+    per_column = {}
+    for col_name, handicaps in (cols or {}).items():
+        csum = 0.0
+        for _, outcomes in handicaps:
+            for entry in (outcomes or []):
+                # entry = [outcome_id, back_prices, lay_prices, volume]
+                vol = entry[3]
+                if vol:                       # null = no volume yet
+                    csum += vol[1] or 0.0     # vol = ["USDT", n]
+        per_column[col_name] = csum
+    return sum(per_column.values()), per_column
+```
+
+Empirical scale (sample drawn from live feed):
+
+| Event | Sport | Grand total (USDT) | Notes |
+|-------|-------|--------------------|-------|
+| Bellucci vs Landaluce | tennis (live ATP) | **32,336** | almost all in `tennis_match,all` |
+| Talk N Text vs NLEX | basket (PBA) | **70** | mostly `ml` + `ahou` |
+| HC Yugra vs Neftyanik | ih (VHL) | **9** | only `time_win,tp,reg,wdw` |
+| FK Ural vs FK KAMAZ | fb (FNL) | **0** | live 2-0 but no settled trades yet |
+
+Volume is **lifetime settled USDT** (not current depth), so it's a good
+liquidity-tier signal — filter `event_volume(cols)[0] > $threshold` to
+build watchlists that exclude dead markets.
+
 ---
 
 ## Common mistakes to flag
