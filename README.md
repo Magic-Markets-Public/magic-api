@@ -1,46 +1,48 @@
-# MagicMarkets API — Claude Skill
+# MagicMarkets API: Claude Skill
 
-A drop-in Claude skill for the **MagicMarkets** P2P sports trading exchange
-— **zero fees, zero commission**, USDT-denominated, REST + WebSocket. Built
-so an LLM can write a working trading bot against the API the first time you
-ask.
+A drop-in Claude skill for the **MagicMarkets** P2P sports markets exchange:
+**zero fees, zero commission**, USDT-denominated, REST + WebSocket. Built so
+an LLM can write a working trading bot against the API the first time you ask.
 
 ```
-                ┌────────────────────────────────────┐
-                │  pro.magicmarkets.com              │
-                │                                    │
-   REST   ──▶ │  /v2/betslips/   (quote prices)    │
-   REST   ──▶ │  /v2/orders/     (place trades)    │
-   REST   ──▶ │  /v2/heartbeats/ (deadman switch)  │
-   wss:// ──▶ │  /magic-cpricefeed/v2  (live book) │
-                └────────────────────────────────────┘
+              ┌──────────────────────────────────────────────┐
+              │  magicmarkets.com                            │
+              │                                              │
+  REST   ──▶  │  /v2/betslips/     quote a selection         │
+  REST   ──▶  │  /v2/orders/       place / close trades      │
+  REST   ──▶  │  /v2/heartbeats/   deadman's switch          │
+  REST   ──▶  │  /v2/balance/      balance & open stake      │
+  wss:// ──▶  │  /v2/stream        events, offers, fills     │
+              └──────────────────────────────────────────────┘
 ```
 
-The skill teaches Claude the full surface area: bet-type grammar,
-WebSocket↔REST translation, idempotent retries, lay-fill pricing,
-market-making patterns, and the error decision tree.
+## What it enables
 
-## What the skill enables Claude to do
+- **Discover events**: the stream's initial sync is the discovery mechanism;
+  there is no REST endpoint that lists events.
+- **Stream live prices**: maintain a correct book from `offer`,
+  `remove_offer` and `clear_events`.
+- **Place orders**: back, lay or parlay, with idempotency via `request_uuid`.
+- **Run protected bots**: heartbeats that auto-close exposure if the bot dies.
+- **Handle failure properly**: in-band error codes, silent TCP closes,
+  reconnect-and-re-register, rate limits.
 
-- **Place orders** — back or lay any market, with idempotency via `request_uuid`.
-- **Stream live prices** — connect to the WebSocket, subscribe to events, and
-  maintain a local price book from snapshot + delta updates.
-- **Translate WS → REST** — turn an `offers_event` price into a
-  `POST /v2/betslips/` + `POST /v2/orders/` call.
-- **Run heartbeat-protected bots** — open a deadman's switch so unfinished
-  orders auto-close if the bot crashes.
-- **Build market-making strategies** — resting lays at a spread, auto-refresh
-  every 80% of timeout, monitor `balance` and `open_stake` from the WS `api`
-  channel.
-- **Cancel & reconcile** — `close_all` filtered by sport / event, or `close_many`
-  by ID.
-- **Read the lay-pricing complement** — MagicMarkets fills lays at
-  `P_back / (P_back − 1)`, not at the back price (not the Betfair convention).
+## Source of truth
+
+MagicMarkets publishes complete, current documentation. This skill is a
+working guide over it, not a replacement: it tells Claude to fetch the real
+docs for exact schemas:
+
+| URL | What |
+|-----|------|
+| [`/llms.txt`](https://magicmarkets.com/llms.txt) | Index |
+| [`/llms-full.txt`](https://magicmarkets.com/llms-full.txt) | Full reference (~109 KB Markdown) |
+| [`/v2/openapi.yaml`](https://magicmarkets.com/v2/openapi.yaml) | OpenAPI 3.1: 18 paths, 29 schemas |
 
 ## Install
 
-Clone directly into your Claude skills directory (the destination folder name
-must match the `name:` field inside `SKILL.md`, which is `magicmarkets-magic-api`):
+Clone into your Claude skills directory (the folder name must match the
+`name:` in `SKILL.md`, which is `magicmarkets-magic-api`):
 
 ```bash
 mkdir -p ~/.claude/skills
@@ -48,76 +50,50 @@ git clone https://github.com/Magic-Markets-Public/magic-api.git \
   ~/.claude/skills/magicmarkets-magic-api
 ```
 
-The skill auto-loads in **Claude Code** (from `~/.claude/skills/` user-wide,
-or `.claude/skills/` per-project — no restart needed) and in any other
-host that follows the same skill layout. For **Claude Desktop**, drop the
-folder into the skills directory shown by Settings → Skills.
+Auto-loads in **Claude Code** (`~/.claude/skills/` user-wide, or
+`.claude/skills/` per-project: no restart needed) and any host using the same
+layout. For **Claude Desktop**, drop the folder into the directory shown by
+Settings → Skills.
 
 ### Verify
 
 ```bash
-# 1. Confirm the skill is in place:
 ls ~/.claude/skills/magicmarkets-magic-api/SKILL.md
 
-# 2. Smoke-test your API key (should return JSON of exchange rates):
-curl -H "X-Api-Key: $MM_API_KEY" https://pro.magicmarkets.com/v2/xrates/
+# smoke-test your key (Settings -> API on magicmarkets.com)
+curl -H "X-Api-Key: $MAGIC_API_KEY" https://magicmarkets.com/v2/xrates/
 ```
 
-Then in a fresh Claude session, ask something like *"using the MagicMarkets
-API, what are the current exchange rates?"* — Claude should pick up the skill
-and reply with curl-grounded output.
+Then ask Claude something like *"using the MagicMarkets API, what's tradeable
+right now?"*
 
-## Trigger phrases
-
-The skill activates when Claude detects you're working with MagicMarkets. Any
-of these phrases will trigger it:
-
-- "MagicMarkets API" / "Magic API" / "pro.magicmarkets.com"
-- "place a back order" / "place a lay" / "create a betslip"
-- "watch event prices" / "price feed" / "watch_event"
-- "heartbeat" / "request_uuid" / "USDT stake"
-- A `betslip_id`, `order_id`, or `bet_type` in conversation
-
-You can also force-trigger it by saying "*using the MagicMarkets skill, …*".
-
-## Repository layout
+## Layout
 
 ```
-.
-├── README.md                          ← this file
-├── LICENSE                            ← MIT
-├── SKILL.md                           ← Claude's main reference
-└── references/
-    ├── rest-reference.md              ← full REST schema, error tree, examples
-    └── pricefeed-reference.md         ← full WebSocket protocol & message grammar
+SKILL.md                    concepts, flow, gotchas: what Claude reads first
+references/streaming.md     WebSocket protocol in full
+references/rest.md          REST endpoints, schemas, errors, limits
+references/recipes.md       task-shaped patterns
+examples/                   runnable Python (03 and 04 dry-run by default)
 ```
 
-## API reference
+## Breaking changes in this revision
 
-The skill is grounded in the live API. For machine-readable specs, see:
+The previous version of this skill was written against infrastructure that has
+since been retired, and would not work:
 
-- OpenAPI (JSON): https://pro.magicmarkets.com/v2/openapi.json
-- OpenAPI (YAML): https://pro.magicmarkets.com/v2/openapi.yaml
+| Previously documented | Actual |
+|---|---|
+| `pro.magicmarkets.com` | `magicmarkets.com` (the `pro.` host 301s) |
+| `wss://…/magic-cpricefeed/v2` | `wss://magicmarkets.com/v2/stream` (the old feed returns **502**) |
+| `["watch_event", [comp_id, sport, event_id]]` | `["register_event", sport, event_id]` |
+| `["offers_event", …]` messages | `["offer", …]` entries inside a `{"ts", "data"}` envelope |
+| `GET /web/offerhist/…` | Does not exist (404) |
 
-If anything in the skill drifts from the live API, the live spec wins —
-please open an issue against this repo.
+`references/pricefeed-reference.md` and `references/rest-reference.md` are now
+redirect stubs, as are `examples/01-find-and-bet.py` and
+`examples/05-arb-detector.py`.
 
-## Getting an API key
+## Licence
 
-Any MagicMarkets account can mint API keys self-service:
-
-1. Sign up or log in at <https://magicmarkets.com>.
-2. Open **Account Settings → API Keys**.
-3. Create a key, copy it, and store it in an environment variable:
-
-```bash
-export MM_API_KEY="..."
-```
-
-Treat keys like passwords — don't commit them, don't log them, don't echo
-them in scripts. The skill teaches Claude to read `$MM_API_KEY` from the
-environment in every example.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+MIT: see [LICENSE](LICENSE).
